@@ -63,9 +63,7 @@ struct Hello {
 
 ![Remote image](https://example.com/image.png)
 
-Jump back to the [top](#textdown-sample) or to [Lists](#lists). Footnote[^1].
-
-[^1]: The footnote text.
+Jump back to the [top](#textdown-sample) or to [Lists](#lists).
 
 - A list item with code:
 

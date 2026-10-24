@@ -76,6 +76,12 @@ final class RendererTests: XCTestCase {
         XCTAssertEqual(MarkdownRenderer.stripFrontMatter("---\n\nText\n---\n"), "---\n\nText\n---\n")
     }
 
+    func testFrontMatterWithWindowsLineEndingsIsHidden() {
+        XCTAssertEqual(MarkdownRenderer.stripFrontMatter("---\r\ntitle: x\r\n---\r\n\r\nHello\r\n"), "\r\nHello\r\n")
+        XCTAssertEqual(paragraphs(render("---\r\ntitle: x\r\ntags: [a]\r\n---\r\n\r\nHello\r\n")), ["Hello"])
+        XCTAssertEqual(MarkdownRenderer.stripFrontMatter("---\r\n\r\nText\r\n---\r\n"), "---\r\n\r\nText\r\n---\r\n")
+    }
+
     func testHeadingAnchors() {
         let rendered = render("# Getting Started\n\ntext\n\n## Getting Started\n\n## What's new?")
         XCTAssertEqual(rendered.anchors["getting-started"], 0)
@@ -123,6 +129,8 @@ final class RendererTests: XCTestCase {
         XCTAssertEqual(pieces, [.image(URL(string: "logo.png")!, alt: "Logo", width: 120, height: nil), .lineBreak,
                                 .text("Title & more", heading: nil)])
         XCTAssertEqual(paragraphs(render("<!-- only a comment -->\n\ntext")), ["text"])
+        // A block that ends in a line break keeps none at its end.
+        XCTAssertEqual(paragraphs(render("<p align=\"center\">\n  <b>Title</b>\n  <br>\n</p>\n\ntext")), ["Title", "text"])
     }
 
     func testSlug() {
@@ -136,7 +144,25 @@ final class RendererTests: XCTestCase {
         let start = Date()
         let rendered = MarkdownRenderer(baseURL: fixture("Sample.md")).render(big)
         XCTAssertGreaterThan(rendered.text.length, 50_000)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 2.0)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.8)
+    }
+
+    /// READMEs put HTML blocks everywhere: their cost must not grow with the
+    /// length of the text before them. Twice the blocks may take about twice
+    /// as long, not four times (it took 3.8 times as long when each block
+    /// copied the whole text). A ratio, so a slower machine does not matter.
+    func testHTMLBlocksCostDoesNotGrowWithTheDocument() {
+        let block = "<p align=\"center\"><b>Centered</b></p>\n\n" + String(repeating: "Some prose that fills the line. ", count: 12)
+            + "\n\n- A list item, so the text is no longer plain ASCII\n\n"
+        func seconds(_ count: Int) -> Double {
+            let source = String(repeating: block, count: count)
+            let start = Date()
+            XCTAssertGreaterThan(render(source).text.length, count * 300)
+            return Date().timeIntervalSince(start)
+        }
+        _ = seconds(200) // warm up
+        let ratio = seconds(3000) / seconds(1500)
+        XCTAssertLessThan(ratio, 2.8, "twice the HTML blocks took \(ratio) times as long")
     }
 }
 
