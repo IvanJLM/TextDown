@@ -177,11 +177,16 @@ private final class MarkdownBuilder {
     private let body: NSFont
     private let gap: CGFloat
     private let step: CGFloat
+    /// The width of a space in code, for tab stops. Measured with the font
+    /// itself (not string drawing), so formatting can run off the main thread.
+    private let codeSpace: CGFloat
 
     init(_ renderer: MarkdownRenderer) {
         self.renderer = renderer
         scale = renderer.scale
         body = Style.bodyFont(scale: scale)
+        let code = Style.codeFont(scale: scale)
+        codeSpace = code.advancement(forCGGlyph: CGGlyph(code.glyph(withName: "space"))).width
         gap = 12 * scale
         step = 26 * scale
     }
@@ -349,9 +354,8 @@ private final class MarkdownBuilder {
             style.lineHeightMultiple = 1.15
             style.paragraphSpacing = 0
             style.lineBreakMode = .byCharWrapping
-            let space = (" " as NSString).size(withAttributes: [.font: Style.codeFont(scale: scale)]).width
             style.tabStops = []
-            style.defaultTabInterval = space * 4
+            style.defaultTabInterval = codeSpace * 4
         case .rule:
             let block = fullWidthBlock()
             block.underline = Style.rule
@@ -705,7 +709,13 @@ enum HTMLText {
 
     private static let comment = try! NSRegularExpression(pattern: #"<!--[\s\S]*?-->"#)
     private static let whitespace = try! NSRegularExpression(pattern: #"\s+"#)
-    private static var attributePatterns: [String: NSRegularExpression] = [:]
+    /// One pattern per attribute read, made once: formatting may run on a
+    /// background thread, so nothing here changes after launch.
+    private static let attributePatterns: [String: NSRegularExpression] = Dictionary(
+        uniqueKeysWithValues: ["src", "alt", "width", "height"].map { name in
+            (name, try! NSRegularExpression(pattern: #"\b"# + name + #"\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#,
+                                            options: .caseInsensitive))
+        })
 
     private static func replace(_ regex: NSRegularExpression, in text: String, with template: String) -> String {
         regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: template)
@@ -756,15 +766,7 @@ enum HTMLText {
     }
 
     private static func attribute(_ name: String, in tag: Substring) -> String? {
-        let regex: NSRegularExpression
-        if let cached = attributePatterns[name] {
-            regex = cached
-        } else {
-            let pattern = #"\b"# + name + #"\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
-            guard let made = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
-            attributePatterns[name] = made
-            regex = made
-        }
+        guard let regex = attributePatterns[name] else { return nil }
         let text = String(tag)
         guard let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
         for group in 1...3 {
