@@ -295,7 +295,6 @@ private final class MarkdownBuilder {
     private func makeTable(columns: Int, indent depth: Int) -> NSTextTable {
         let table = NSTextTable()
         table.numberOfColumns = max(columns, 1)
-        table.layoutAlgorithm = .automatic
         table.collapsesBorders = true
         table.hidesEmptyCells = false
         table.setWidth(CGFloat(depth) * step, type: .absoluteValueType, for: .margin, edge: .minX)
