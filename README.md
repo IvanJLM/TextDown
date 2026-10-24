@@ -70,7 +70,11 @@ live preview pane and no auto-updates.
 - Each window makes its views when first needed: a Markdown file you only
   read never creates an editor, a text file never creates a reader.
 - The formatted text is built once per change, straight from the parser's
-  output; parsing temporaries are released as it goes.
+  output; parsing temporaries are released as it goes. Going back to it
+  with ⌘E reuses it. Documents over 64 KB are formatted in the background,
+  so the window never waits for them.
+- Zoom and ⌘E keep your place by character, so only the text on screen
+  is laid out, never the whole document.
 - Each image file is decoded once per document, at most twice the column
   width, never at full size.
 - Changes on disk are noticed by one kernel event per open file: no polling,

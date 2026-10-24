@@ -15,6 +15,17 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     private var images: [RenderedImage] = []
     private var zoom: CGFloat = 1
     private var shown = false
+    /// What the reader shows, so an unchanged document is not formatted again.
+    private var rendered: (source: String, zoom: CGFloat)?
+    private var renderGeneration = 0
+    /// True while a large document is being formatted in the background.
+    private(set) var isRendering = false
+
+    /// Documents larger than this (UTF-8 bytes, about 80 ms of work) are
+    /// formatted off the main thread: the window stays responsive meanwhile.
+    static let backgroundRenderSize = 64 * 1024
+    private static let renderQueue = DispatchQueue(label: "com.ivanjlm.textdown.render", qos: .userInitiated,
+                                                   autoreleaseFrequency: .workItem)
 
     private var textDocument: TextDocument? { document as? TextDocument }
 
@@ -74,7 +85,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
                 NSValue(range: NSIntersectionRange(range.rangeValue, NSRange(location: 0, length: length)))
             }
         }
-        if mode == .reading { renderReader(keepingScroll: .absolute) }
+        if mode == .reading { renderReader(keeping: currentPlace()) }
     }
 
     /// Saved under a new name that changes it from text to Markdown or back.
@@ -88,20 +99,22 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     private func setMode(_ newMode: Mode) {
         guard let window else { return }
-        let fraction = scrollFraction()
+        let place = currentPlace()
         mode = newMode
         switch newMode {
         case .reading:
             let scroll = readerScroll ?? makeReader()
-            renderReader(keepingScroll: .none)
             window.contentView = scroll
             window.makeFirstResponder(reader)
+            scroll.layoutSubtreeIfNeeded()
+            renderReader(keeping: place)
         case .editing:
             let scroll = editorScroll ?? makeEditor()
             window.contentView = scroll
             window.makeFirstResponder(editor)
+            scroll.layoutSubtreeIfNeeded()
+            restore(place)
         }
-        if let fraction { setScrollFraction(fraction) }
     }
 
     @objc func toggleEditing(_ sender: Any?) {
@@ -188,37 +201,66 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         view.maxColumnWidth = Style.column * zoom
     }
 
-    private enum ScrollKeeping { case none, absolute, fraction }
-
-    private func renderReader(keepingScroll keeping: ScrollKeeping) {
-        guard let reader, let textDocument else { return }
-        let fraction = keeping == .fraction ? scrollFraction() : nil
-        let origin = readerScroll?.contentView.bounds.origin
-        reader.maxColumnWidth = Style.column * zoom
+    /// Formats the Markdown for the reader, unless it already shows this text
+    /// at this zoom. Large documents are formatted in the background; the
+    /// reader keeps showing what it had until the new text is ready.
+    private func renderReader(keeping place: Place?) {
+        guard reader != nil, let textDocument else { return }
         let source = currentText() ?? textDocument.text
-        let rendered = MarkdownRenderer(baseURL: textDocument.fileURL, scale: zoom, columnWidth: Style.column * zoom)
-            .render(source)
-        reader.textStorage?.setAttributedString(rendered.text)
-        anchors = rendered.anchors
-        images = rendered.images
+        let zoom = zoom
+        if let rendered, rendered.zoom == zoom, rendered.source == source {
+            restore(place)
+            return
+        }
+        let renderer = MarkdownRenderer(baseURL: textDocument.fileURL, scale: zoom, columnWidth: Style.column * zoom)
+        renderGeneration += 1
+        let generation = renderGeneration
+        guard source.utf8.count > Self.backgroundRenderSize else {
+            isRendering = false
+            show(renderer.render(source), of: source, zoom: zoom, keeping: place)
+            return
+        }
+        isRendering = true
+        Self.renderQueue.async { [weak self] in
+            let result = renderer.render(source)
+            DispatchQueue.main.async {
+                // A newer render (another zoom, a reload) replaces this one.
+                guard let self, generation == self.renderGeneration else { return }
+                self.isRendering = false
+                self.show(result, of: source, zoom: zoom, keeping: place)
+            }
+        }
+    }
+
+    private func show(_ result: RenderedMarkdown, of source: String, zoom: CGFloat, keeping place: Place?) {
+        guard let reader else { return }
+        reader.maxColumnWidth = Style.column * zoom
+        if let storage = reader.textStorage {
+            // Emptied first: replacing a long formatted text in place merges
+            // the old and new attribute runs one by one (2 s for 1 MB);
+            // filling an empty storage takes a few milliseconds.
+            storage.beginEditing()
+            storage.setAttributedString(NSAttributedString())
+            storage.setAttributedString(result.text)
+            storage.endEditing()
+        }
+        anchors = result.anchors
+        images = result.images
+        rendered = (source, zoom)
         fitImages(to: reader.columnWidth)
         // Parsing leaves free memory behind; give it back to the system.
         DispatchQueue.main.async { malloc_zone_pressure_relief(nil, 0) }
-        if let fraction {
-            setScrollFraction(fraction)
-        } else if keeping == .absolute, let origin, let scroll = readerScroll {
-            reader.layoutManager?.ensureLayout(forBoundingRect: NSRect(origin: origin, size: scroll.contentView.bounds.size),
-                                               in: reader.textContainer!)
-            scroll.contentView.scroll(to: origin)
-            scroll.reflectScrolledClipView(scroll.contentView)
-        }
+        if mode == .reading { restore(place) }
     }
 
     /// Images are never wider than the column; narrow the window and they
     /// shrink with it.
     private func fitImages(to columnWidth: CGFloat) {
-        guard let storage = reader?.textStorage, columnWidth > 0 else { return }
+        guard let storage = reader?.textStorage, columnWidth > 0, !images.isEmpty else { return }
         var changed = false
+        // One layout pass for all the images, not one per image.
+        storage.beginEditing()
+        defer { storage.endEditing() }
         for image in images where image.location < storage.length {
             let width = min(image.naturalSize.width, columnWidth).rounded(.down)
             guard abs(image.attachment.bounds.width - width) >= 1 else { continue }
@@ -234,23 +276,68 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         mode == .reading ? readerScroll : editorScroll
     }
 
-    private func scrollFraction() -> CGFloat? {
-        guard let scroll = activeScroll(), let view = scroll.documentView, window?.contentView === scroll else { return nil }
-        let visible = scroll.contentView.bounds
-        let range = view.frame.height - visible.height
-        return range > 0 ? visible.origin.y / range : 0
+    // MARK: Keeping the place
+
+    /// The first character on screen, and the length of the text it is in.
+    /// Kept by character, not by height: finding a height means laying out
+    /// the whole document, while finding a character only needs the lines
+    /// around it.
+    private struct Place {
+        var character: Int
+        var length: Int
+        var mode: Mode
     }
 
-    private func setScrollFraction(_ fraction: CGFloat) {
-        guard let scroll = activeScroll(), let view = scroll.documentView as? NSTextView else { return }
-        if let layout = view.layoutManager, let container = view.textContainer {
-            layout.ensureLayout(for: container)
-        } else if let layout = view.textLayoutManager {
-            layout.ensureLayout(for: layout.documentRange)
+    private func currentPlace() -> Place? {
+        guard let scroll = activeScroll(), window?.contentView === scroll, let view = scroll.documentView as? NSTextView,
+              let length = view.textStorage?.length, length > 0 else { return nil }
+        let top = scroll.contentView.bounds.minY
+        let character = top <= view.textContainerOrigin.y ? 0
+            : view.characterIndexForInsertion(at: NSPoint(x: view.textContainerOrigin.x + 1, y: top + 1))
+        return Place(character: min(character, length), length: length, mode: mode)
+    }
+
+    /// Scrolls back to a place: the same character when the text is the same,
+    /// otherwise the same proportion of the text (the source and the
+    /// formatted text are about as long as each other).
+    private func restore(_ place: Place?) {
+        guard let place, let view = activeScroll()?.documentView as? NSTextView,
+              let length = view.textStorage?.length, length > 0 else { return }
+        let character = place.mode == mode && place.length == length
+            ? place.character
+            : Int((Double(place.character) / Double(max(place.length, 1)) * Double(length)).rounded())
+        scrollToCharacter(character)
+    }
+
+    /// Puts the line holding a character at the top of the window, laying out
+    /// only the text up to it in TextKit 1 (the reader) or around it in
+    /// TextKit 2 (the editor).
+    func scrollToCharacter(_ character: Int) {
+        guard let scroll = activeScroll(), let view = scroll.documentView as? NSTextView,
+              let length = view.textStorage?.length else { return }
+        let index = min(max(0, character), max(0, length - 1))
+        // First let AppKit bring the character on screen: it lays out the
+        // text around it and makes the view tall enough to scroll there.
+        view.scrollRangeToVisible(NSRange(location: index, length: 0))
+        var y: CGFloat = 0
+        // TextKit 2 first: asking a TextKit 2 view for its layoutManager
+        // would switch it to TextKit 1 for good.
+        if index > 0, let layout = view.textLayoutManager {
+            if let location = layout.location(layout.documentRange.location, offsetBy: index) {
+                layout.ensureLayout(for: NSTextRange(location: location))
+                layout.enumerateTextLayoutFragments(from: location, options: [.ensuresLayout]) { fragment in
+                    y = fragment.layoutFragmentFrame.minY
+                    return false
+                }
+            }
+        } else if index > 0, let layout = view.layoutManager {
+            layout.ensureLayout(forCharacterRange: NSRange(location: index, length: 1))
+            y = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: index), effectiveRange: nil).minY
         }
+        if index > 0 { y += view.textContainerOrigin.y }
         view.layoutSubtreeIfNeeded()
-        let range = view.frame.height - scroll.contentView.bounds.height
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, range * fraction)))
+        let limit = max(0, view.frame.height - scroll.contentView.bounds.height)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: min(max(0, y), limit)))
         scroll.reflectScrolledClipView(scroll.contentView)
     }
 
@@ -303,11 +390,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     private func setZoom(_ value: CGFloat) {
         guard value != zoom else { return }
-        let fraction = scrollFraction()
+        let place = currentPlace()
         zoom = value
         if let editor { styleEditor(editor) }
-        if reader != nil, mode == .reading { renderReader(keepingScroll: .none) }
-        if let fraction { setScrollFraction(fraction) }
+        if mode == .reading { renderReader(keeping: place) } else { restore(place) }
     }
 
     // MARK: Menu commands
