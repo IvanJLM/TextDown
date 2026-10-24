@@ -1,0 +1,74 @@
+# project.yml — TextDown, a minimal native text editor and Markdown reader for macOS (Apple Silicon only)
+name: TextDown
+options:
+  bundleIdPrefix: com.ivanjlm
+  deploymentTarget:
+    macOS: "15.0"
+  xcodeVersion: "26.0"
+  groupSortPosition: top
+  defaultLocalization: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    # Apple Silicon only.
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: NO
+    # Local ad-hoc signing: no Apple Developer account needed.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: YES
+    SWIFT_EMIT_LOC_STRINGS: NO
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+  configs:
+    Release:
+      DEAD_CODE_STRIPPING: YES
+      SWIFT_COMPILATION_MODE: wholemodule
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      STRIP_INSTALLED_PRODUCT: YES
+
+targets:
+  TextDown:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Sources
+      - path: App/Resources
+        excludes:
+          - "Info.plist"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ivanjlm.textdown
+        INFOPLIST_FILE: App/Resources/Info.plist
+        PRODUCT_NAME: TextDown
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  TextDownTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+        excludes:
+          - "Fixtures/**"
+    dependencies:
+      - target: TextDown
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ivanjlm.textdown.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  TextDown:
+    build:
+      targets:
+        TextDown: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - TextDownTests
