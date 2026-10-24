@@ -148,14 +148,21 @@ final class RendererTests: XCTestCase {
     }
 
     /// READMEs put HTML blocks everywhere: their cost must not grow with the
-    /// length of the text before them.
-    func testManyHTMLBlocksRenderQuickly() {
-        let block = "<p align=\"center\"><b>Centered</b></p>\n\n" + String(repeating: "Some prose that fills the line. ", count: 12) + "\n\n- A list item, so the text is no longer plain ASCII\n\n"
-        let source = String(repeating: block, count: 3000) // about 1.4 MB
-        let start = Date()
-        let rendered = render(source)
-        XCTAssertGreaterThan(rendered.text.length, 1_000_000)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 1.5)
+    /// length of the text before them. Twice the blocks may take about twice
+    /// as long, not four times (it took 3.8 times as long when each block
+    /// copied the whole text). A ratio, so a slower machine does not matter.
+    func testHTMLBlocksCostDoesNotGrowWithTheDocument() {
+        let block = "<p align=\"center\"><b>Centered</b></p>\n\n" + String(repeating: "Some prose that fills the line. ", count: 12)
+            + "\n\n- A list item, so the text is no longer plain ASCII\n\n"
+        func seconds(_ count: Int) -> Double {
+            let source = String(repeating: block, count: count)
+            let start = Date()
+            XCTAssertGreaterThan(render(source).text.length, count * 300)
+            return Date().timeIntervalSince(start)
+        }
+        _ = seconds(200) // warm up
+        let ratio = seconds(3000) / seconds(1500)
+        XCTAssertLessThan(ratio, 2.8, "twice the HTML blocks took \(ratio) times as long")
     }
 }
 
