@@ -91,8 +91,10 @@ Rendering times for a document full of tables, lists and images:
 
 ## Install
 
-Requirements: an Apple Silicon Mac with macOS 15 or later, Xcode 26 or later,
-and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Requirements: an Apple Silicon Mac with macOS 15 or later (it is built and
+tested on macOS 26), Xcode 26.6 or later (the CI builds with exactly 26.6,
+so the oldest supported Xcode keeps working) and
+[XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```bash
 brew install xcodegen

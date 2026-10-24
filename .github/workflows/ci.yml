@@ -16,10 +16,13 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Tools
+        # The oldest Xcode the README supports, so newer SDKs on a developer's
+        # Mac cannot hide a break (as when an NSTextTable enum case was renamed).
         run: |
           brew install xcodegen
+          sudo xcode-select -s /Applications/Xcode_26.6.app
           xcodebuild -version
       - name: Unit tests (Debug)
         run: ./scripts/test.sh
