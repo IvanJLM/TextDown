@@ -53,13 +53,22 @@ struct MarkdownRenderer {
     /// Markdown would otherwise show as a rule and a heading.
     static func stripFrontMatter(_ source: String) -> String {
         guard source.hasPrefix("---\n") || source.hasPrefix("---\r\n") else { return source }
-        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
-        guard lines.count > 2, lines[1].contains(":") else { return source }
-        for index in 2..<lines.count {
-            let line = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
-            if line == "---" || line == "..." {
-                return lines[(index + 1)...].joined(separator: "\n")
+        // Line by line on Unicode scalars: in a String, "\r\n" is one character,
+        // so splitting characters on "\n" would miss Windows line endings.
+        let scalars = source.unicodeScalars
+        guard var start = scalars.firstIndex(of: "\n").map({ scalars.index(after: $0) }) else { return source }
+        var first = true
+        while start < scalars.endIndex {
+            let end = scalars[start...].firstIndex(of: "\n") ?? scalars.endIndex
+            let line = String(scalars[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if first {
+                guard line.contains(":") else { return source }
+                first = false
+            } else if line == "---" || line == "..." {
+                return end < scalars.endIndex ? String(scalars[scalars.index(after: end)...]) : ""
             }
+            guard end < scalars.endIndex else { break }
+            start = scalars.index(after: end)
         }
         return source
     }
@@ -158,7 +167,9 @@ private final class MarkdownBuilder {
     private var tables: [Int: (table: NSTextTable, columns: [PresentationIntent.TableColumn])] = [:]
     /// The next cell a table expects, to fill in cells Markdown leaves empty.
     private var tableCursor: (table: Int, row: Int, column: Int)?
-    private var htmlKey = -1
+    /// Keys of HTML blocks, counting down from below the ones the builder
+    /// uses itself (-2 for text without intent, -3 for empty table cells).
+    private var htmlKey = -10
     private var fonts: [String: NSFont] = [:]
     /// Each image file is decoded once, however often the document shows it.
     private var decoded: [URL: (image: NSImage, size: CGSize)?] = [:]
@@ -550,16 +561,7 @@ private final class MarkdownBuilder {
             return
         }
         var attributes = attributes(inline)
-        if let link {
-            if text.hasPrefix("^") {
-                // A footnote reference: shown as a superscript, not a link.
-                text.removeFirst()
-                attributes[.baselineOffset] = body.pointSize * 0.35
-                attributes[.font] = NSFont.systemFont(ofSize: body.pointSize * 0.7)
-            } else {
-                attributes[.link] = link
-            }
-        }
+        if let link { attributes[.link] = link }
         appendText(text, attributes: attributes)
     }
 
@@ -683,8 +685,7 @@ private final class MarkdownBuilder {
                 atLineStart = true
             }
         }
-        // No trailing line break inside the paragraph.
-        if out.string.hasSuffix("\u{2028}") { out.deleteCharacters(in: NSRange(location: out.length - 1, length: 1)) }
+        // HTMLText.pieces never ends with a line break, so none is left at the end.
     }
 }
 

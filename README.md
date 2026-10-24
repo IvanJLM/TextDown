@@ -83,7 +83,7 @@ Rendering times for a document full of tables, lists and images:
 |---|---|---|
 | 10 KB | 65 ms | 7 MB |
 | 100 KB | 150 ms | 17 MB |
-| 1 MB | 1.5 s | 57 MB |
+| 1 MB | 0.95 s | 57 MB |
 
 ## Install
 

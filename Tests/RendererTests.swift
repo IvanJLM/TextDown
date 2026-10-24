@@ -76,6 +76,12 @@ final class RendererTests: XCTestCase {
         XCTAssertEqual(MarkdownRenderer.stripFrontMatter("---\n\nText\n---\n"), "---\n\nText\n---\n")
     }
 
+    func testFrontMatterWithWindowsLineEndingsIsHidden() {
+        XCTAssertEqual(MarkdownRenderer.stripFrontMatter("---\r\ntitle: x\r\n---\r\n\r\nHello\r\n"), "\r\nHello\r\n")
+        XCTAssertEqual(paragraphs(render("---\r\ntitle: x\r\ntags: [a]\r\n---\r\n\r\nHello\r\n")), ["Hello"])
+        XCTAssertEqual(MarkdownRenderer.stripFrontMatter("---\r\n\r\nText\r\n---\r\n"), "---\r\n\r\nText\r\n---\r\n")
+    }
+
     func testHeadingAnchors() {
         let rendered = render("# Getting Started\n\ntext\n\n## Getting Started\n\n## What's new?")
         XCTAssertEqual(rendered.anchors["getting-started"], 0)
@@ -123,6 +129,8 @@ final class RendererTests: XCTestCase {
         XCTAssertEqual(pieces, [.image(URL(string: "logo.png")!, alt: "Logo", width: 120, height: nil), .lineBreak,
                                 .text("Title & more", heading: nil)])
         XCTAssertEqual(paragraphs(render("<!-- only a comment -->\n\ntext")), ["text"])
+        // A block that ends in a line break keeps none at its end.
+        XCTAssertEqual(paragraphs(render("<p align=\"center\">\n  <b>Title</b>\n  <br>\n</p>\n\ntext")), ["Title", "text"])
     }
 
     func testSlug() {
@@ -136,7 +144,18 @@ final class RendererTests: XCTestCase {
         let start = Date()
         let rendered = MarkdownRenderer(baseURL: fixture("Sample.md")).render(big)
         XCTAssertGreaterThan(rendered.text.length, 50_000)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 2.0)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.8)
+    }
+
+    /// READMEs put HTML blocks everywhere: their cost must not grow with the
+    /// length of the text before them.
+    func testManyHTMLBlocksRenderQuickly() {
+        let block = "<p align=\"center\"><b>Centered</b></p>\n\n" + String(repeating: "Some prose that fills the line. ", count: 12) + "\n\n- A list item, so the text is no longer plain ASCII\n\n"
+        let source = String(repeating: block, count: 3000) // about 1.4 MB
+        let start = Date()
+        let rendered = render(source)
+        XCTAssertGreaterThan(rendered.text.length, 1_000_000)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1.5)
     }
 }
 
