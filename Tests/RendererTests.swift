@@ -172,22 +172,39 @@ final class EncodingTests: XCTestCase {
         XCTAssertEqual(TextEncoding.decode(Data([0xEF, 0xBB, 0xBF] + Array("año".utf8)))?.text, "año")
     }
 
+    /// Saving a file nobody changed writes back the same bytes, byte order
+    /// mark and byte order included.
+    func testSavesTheBytesItRead() throws {
+        let files: [Data] = [
+            Data("año\n".utf8),
+            Data([0xEF, 0xBB, 0xBF] + Array("año\n".utf8)),
+            Data([0xFF, 0xFE]) + "año\n".data(using: .utf16LittleEndian)!,
+            Data([0xFE, 0xFF]) + "año\n".data(using: .utf16BigEndian)!,
+            "Canción del niño\n".data(using: .windowsCP1252)!,
+        ]
+        for data in files {
+            let decoded = try XCTUnwrap(TextEncoding.decode(data))
+            XCTAssertTrue(decoded.text.contains("ñ"))
+            XCTAssertEqual(TextEncoding.encode(decoded.text, as: decoded.format), data, "\(Array(data.prefix(4)))")
+        }
+    }
+
     func testUTF16() {
         let data = "año".data(using: .utf16)! // with a byte order mark
         let decoded = TextEncoding.decode(data)
         XCTAssertEqual(decoded?.text, "año")
-        XCTAssertEqual(decoded?.encoding, .utf16)
+        XCTAssertEqual(decoded?.format.byteOrderMark, true)
     }
 
     func testLatin1IsDetectedAndKept() {
         let data = "Canción del niño".data(using: .windowsCP1252)!
         let decoded = TextEncoding.decode(data)
         XCTAssertEqual(decoded?.text, "Canción del niño")
-        XCTAssertEqual(TextEncoding.encode(decoded!.text, preferred: decoded!.encoding), data)
+        XCTAssertEqual(TextEncoding.encode(decoded!.text, as: decoded!.format), data)
     }
 
     func testFallsBackToUTF8WhenTheEncodingCannotHoldTheText() {
-        XCTAssertEqual(TextEncoding.encode("emoji 🙂", preferred: .isoLatin1), Data("emoji 🙂".utf8))
+        XCTAssertEqual(TextEncoding.encode("emoji 🙂", as: .init(encoding: .isoLatin1)), Data("emoji 🙂".utf8))
     }
 
     func testEmptyFile() {

@@ -7,9 +7,11 @@ final class TextDocument: NSDocument {
     /// The contents as last read from disk. While the document is being
     /// edited, the window's editor holds the live text.
     private(set) var text = ""
-    private var encoding: String.Encoding = .utf8
+    private var format = TextEncoding.Format(encoding: .utf8)
     /// Watches the file so changes made by other apps show up right away.
     private var watcher: DispatchSourceFileSystemObject?
+    /// Watches the file's folder while the file is missing, until it is back.
+    private var folderWatcher: DispatchSourceFileSystemObject?
     private var reloadPending = false
 
     override var fileURL: URL? {
@@ -40,11 +42,11 @@ final class TextDocument: NSDocument {
             throw CocoaError(.fileReadInapplicableStringEncoding)
         }
         text = decoded.text
-        encoding = decoded.encoding
+        format = decoded.format
     }
 
     override func data(ofType typeName: String) throws -> Data {
-        TextEncoding.encode(windowController?.currentText() ?? text, preferred: encoding)
+        TextEncoding.encode(windowController?.currentText() ?? text, as: format)
     }
 
     /// Reloaded from disk, after Revert or when another app changed the file.
@@ -57,6 +59,8 @@ final class TextDocument: NSDocument {
     override func close() {
         watcher?.cancel()
         watcher = nil
+        folderWatcher?.cancel()
+        folderWatcher = nil
         super.close()
     }
 
@@ -66,9 +70,14 @@ final class TextDocument: NSDocument {
     private func watchFile() {
         watcher?.cancel()
         watcher = nil
+        folderWatcher?.cancel()
+        folderWatcher = nil
         guard let url = fileURL else { return }
         let descriptor = open(url.path, O_EVTONLY)
-        guard descriptor >= 0 else { return }
+        guard descriptor >= 0 else {
+            watchFolder(of: url)
+            return
+        }
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: descriptor, eventMask: [.write, .extend, .delete, .rename], queue: .main)
         source.setEventHandler { [weak self, unowned source] in
@@ -80,6 +89,22 @@ final class TextDocument: NSDocument {
         source.setCancelHandler { Darwin.close(descriptor) }
         source.resume()
         watcher = source
+    }
+
+    /// The file is gone, deleted or not yet written again: one kernel event
+    /// source on its folder says when something there changes, and the file
+    /// is followed again as soon as it exists.
+    private func watchFolder(of url: URL) {
+        let descriptor = open(url.deletingLastPathComponent().path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: .write, queue: .main)
+        source.setEventHandler { [weak self] in
+            guard let self, let url = self.fileURL, FileManager.default.fileExists(atPath: url.path) else { return }
+            self.scheduleReload(rewatch: true)
+        }
+        source.setCancelHandler { Darwin.close(descriptor) }
+        source.resume()
+        folderWatcher = source
     }
 
     private func scheduleReload(rewatch: Bool) {
