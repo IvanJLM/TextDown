@@ -15,13 +15,13 @@ text and AppKit's document architecture for opening and saving.
 
 Measured on an M-series Mac with macOS 26, with `./scripts/benchmark.sh`:
 
-| | TextDown 1.0 | TextEdit |
+| | TextDown 1.2 | TextEdit |
 |---|---|---|
-| Memory, a README open | 31 MB, formatted | 29 MB, as raw text |
-| Memory, 25 windows | 176 MB | 215 MB |
+| Memory, a README open | 30 MB, formatted | 29 MB, as raw text |
+| Memory, 25 windows | 142 MB | 215 MB |
 | CPU while idle | 0.0 % | 0.0 % |
-| Threads while idle | 3 | 16 |
-| App size | 0.8 MB | — |
+| Threads while idle | 5 | 16 |
+| App size | 0.9 MB | — |
 
 TextDown quits when its last window closes, so it uses no memory at all when
 you are not reading or writing.
@@ -37,6 +37,9 @@ you are not reading or writing.
   autocorrection, no rich text. `.txt` files open ready to type.
 - **⌘E switches a Markdown file to its source** and back. Markdown opens
   read-only, so a stray key never changes it.
+- **The title bar disappears into the page**: the window buttons and the
+  document's name appear while the mouse moves and fade out two seconds after
+  it stops. Scrolling never brings them back.
 - **Follows the file**: change it in another app and TextDown shows the new
   version at once, keeping your place.
 - **Links work**: web links open in your browser, `#section` links jump to the
