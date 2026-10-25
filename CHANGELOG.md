@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0 — 2026-10-25
+
+- The title bar disappears into the page, as in Vids: the window buttons and
+  the document's name fade in when the mouse moves over the window and fade
+  out two seconds after it stops. Scrolling does not bring them back, so the
+  page stays clean while you read. In full screen macOS shows the bar as usual.
+- 25 windows open: 142 MB instead of 177 MB.
+
 ## 1.1.0 — 2026-10-24
 
 Faster and lighter with long documents, and three fixes, after the first

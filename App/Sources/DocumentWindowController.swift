@@ -11,6 +11,9 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     private var readerScroll: NSScrollView?
     private var editor: ColumnTextView?
     private var editorScroll: NSScrollView?
+    /// Holds the reader or the editor, and the shade behind the title bar.
+    private let content = NSView()
+    private var chrome: WindowChrome!
     private var anchors: [String: Int] = [:]
     private var images: [RenderedImage] = []
     private var zoom: CGFloat = 1
@@ -33,8 +36,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let size = NSSize(width: min(Style.column + 2 * 60, screen.width * 0.9), height: min(screen.height * 0.82, 940))
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: true)
+        // The page runs under the title bar, which shows only while the mouse moves.
+        window.titlebarAppearsTransparent = true
         window.minSize = NSSize(width: 360, height: 240)
         window.backgroundColor = .textBackgroundColor
         window.tabbingMode = .disallowed
@@ -46,9 +51,12 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             window.setFrameTopLeftPoint(topLeft)
             window.setFrame(window.constrainFrameRect(window.frame, to: previous.screen), display: false)
         }
+        content.frame = NSRect(origin: .zero, size: size)
+        window.contentView = content
         super.init(window: window)
         window.delegate = self
         shouldCascadeWindows = false
+        chrome = WindowChrome(window: window, content: content)
     }
 
     @available(*, unavailable)
@@ -59,6 +67,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
             guard !shown, let textDocument else { return }
             shown = true
             setMode(textDocument.isMarkdown ? .reading : .editing)
+            chrome.show()
         }
     }
 
@@ -104,17 +113,28 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         switch newMode {
         case .reading:
             let scroll = readerScroll ?? makeReader()
-            window.contentView = scroll
+            showScroll(scroll)
             window.makeFirstResponder(reader)
             scroll.layoutSubtreeIfNeeded()
             renderReader(keeping: place)
         case .editing:
             let scroll = editorScroll ?? makeEditor()
-            window.contentView = scroll
+            showScroll(scroll)
             window.makeFirstResponder(editor)
             scroll.layoutSubtreeIfNeeded()
             restore(place)
         }
+    }
+
+    /// Puts the reader or the editor in the window, under the shade.
+    private func showScroll(_ scroll: NSScrollView) {
+        for view in [readerScroll, editorScroll] where view !== scroll { view?.removeFromSuperview() }
+        if scroll.superview !== content {
+            scroll.frame = content.bounds
+            scroll.autoresizingMask = [.width, .height]
+            content.addSubview(scroll)
+        }
+        chrome.bringShadeToFront()
     }
 
     @objc func toggleEditing(_ sender: Any?) {
@@ -289,7 +309,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     }
 
     private func currentPlace() -> Place? {
-        guard let scroll = activeScroll(), window?.contentView === scroll, let view = scroll.documentView as? NSTextView,
+        guard let scroll = activeScroll(), scroll.superview === content, let view = scroll.documentView as? NSTextView,
               let length = view.textStorage?.length, length > 0 else { return nil }
         let top = scroll.contentView.bounds.minY
         let character = top <= view.textContainerOrigin.y ? 0
@@ -421,7 +441,11 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         }
     }
 
+    func windowWillEnterFullScreen(_ notification: Notification) { chrome.suspend() }
+    func windowDidExitFullScreen(_ notification: Notification) { chrome.resume() }
+
     func windowWillClose(_ notification: Notification) {
+        chrome.stop()
         reader?.delegate = nil
         editor?.delegate = nil
     }

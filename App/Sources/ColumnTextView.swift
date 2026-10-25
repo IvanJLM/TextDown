@@ -28,7 +28,8 @@ final class ColumnTextView: NSTextView {
 
     private func updateInset() {
         let side = max(Style.margin, ((bounds.width - maxColumnWidth) / 2).rounded(.down))
-        let vertical: CGFloat = 26
+        // Below the hidden title bar, whose height the scroll view adds on top.
+        let vertical: CGFloat = 14
         if textContainerInset.width != side || textContainerInset.height != vertical {
             textContainerInset = NSSize(width: side, height: vertical)
         }
