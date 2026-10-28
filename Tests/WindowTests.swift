@@ -118,4 +118,31 @@ final class WindowTests: XCTestCase {
         XCTAssertFalse(reader.textStorage?.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as AnyObject === style,
                        "a new zoom formats again")
     }
+
+    func testNewWindowsOpenWithTheLastWindowsFrame() throws {
+        let name = DocumentWindowController.frameName
+        DocumentWindowController.frameName = "Test \(UUID().uuidString)"
+        let key = "NSWindow Frame \(DocumentWindowController.frameName)"
+        defer {
+            UserDefaults.standard.removeObject(forKey: key)
+            DocumentWindowController.frameName = name
+        }
+        let (_, controller) = try open("Some text.\n", name: "first.txt")
+        let window = try XCTUnwrap(controller.window)
+        let screen = try XCTUnwrap(window.screen ?? NSScreen.main).visibleFrame
+        let frame = NSRect(x: screen.minX + 40, y: screen.minY + 30, width: 520, height: 410)
+        window.orderFront(nil)
+        window.setFrame(frame, display: false)
+        window.orderOut(nil)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).txt")
+        try Data("More text.\n".utf8).write(to: url)
+        let next = try TextDocument(contentsOf: url, ofType: "public.plain-text")
+        defer {
+            next.close()
+            try? FileManager.default.removeItem(at: url)
+        }
+        next.makeWindowControllers()
+        XCTAssertEqual(next.windowControllers.first?.window?.frame, frame, "the same size and place")
+        XCTAssertNotNil(UserDefaults.standard.string(forKey: key))
+    }
 }

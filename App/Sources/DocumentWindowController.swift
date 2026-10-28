@@ -29,6 +29,9 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
     static let backgroundRenderSize = 64 * 1024
     private static let renderQueue = DispatchQueue(label: "com.ivanjlm.textdown.render", qos: .userInitiated,
                                                    autoreleaseFrequency: .workItem)
+    /// Where the place and size of the last window moved or resized are kept
+    /// between launches.
+    static var frameName = "Document"
 
     private var textDocument: TextDocument? { document as? TextDocument }
 
@@ -44,14 +47,15 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
         window.backgroundColor = .textBackgroundColor
         window.tabbingMode = .disallowed
         window.isRestorable = false
-        window.center()
+        // Each window opens with the size and place the last one was left at.
+        if !window.setFrameUsingName(Self.frameName) { window.center() }
         // Each new window sits a step below and to the right of the last one.
         if let previous = NSApp.orderedWindows.first(where: { $0.isVisible && $0.windowController is DocumentWindowController }) {
             let topLeft = NSPoint(x: previous.frame.minX + 26, y: previous.frame.maxY - 26)
             window.setFrameTopLeftPoint(topLeft)
             window.setFrame(window.constrainFrameRect(window.frame, to: previous.screen), display: false)
         }
-        content.frame = NSRect(origin: .zero, size: size)
+        content.frame = NSRect(origin: .zero, size: window.contentRect(forFrameRect: window.frame).size)
         window.contentView = content
         super.init(window: window)
         window.delegate = self
@@ -443,6 +447,18 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     func windowWillEnterFullScreen(_ notification: Notification) { chrome.suspend() }
     func windowDidExitFullScreen(_ notification: Notification) { chrome.resume() }
+
+    func windowDidMove(_ notification: Notification) { rememberFrame() }
+    func windowDidEndLiveResize(_ notification: Notification) { rememberFrame() }
+    func windowDidResize(_ notification: Notification) {
+        if window?.inLiveResize == false { rememberFrame() }
+    }
+
+    /// Full screen is not a size to come back to, nor a hidden window's frame.
+    private func rememberFrame() {
+        guard let window, window.isVisible, !window.styleMask.contains(.fullScreen) else { return }
+        window.saveFrame(usingName: Self.frameName)
+    }
 
     func windowWillClose(_ notification: Notification) {
         chrome.stop()

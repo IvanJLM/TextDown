@@ -40,6 +40,8 @@ you are not reading or writing.
 - **The title bar disappears into the page**: the window buttons and the
   document's name appear while the mouse moves and fade out two seconds after
   it stops. Scrolling never brings them back.
+- **Remembers the window**: files open with the size and place you last left
+  a window at, also after quitting.
 - **Follows the file**: change it in another app and TextDown shows the new
   version at once, keeping your place.
 - **Links work**: web links open in your browser, `#section` links jump to the
