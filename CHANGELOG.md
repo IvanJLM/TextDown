@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 — 2026-10-28
+
+- Windows remember their size and place: every file, new or the same one,
+  opens where you left the last window you moved or resized, also after
+  quitting. Full screen is not remembered.
+
 ## 1.2.0 — 2026-10-25
 
 - The title bar disappears into the page, as in Vids: the window buttons and
