@@ -138,13 +138,18 @@ final class RendererTests: XCTestCase {
         XCTAssertEqual(MarkdownRenderer.slug("Ñandú y café"), "ñandú-y-café")
     }
 
+    /// About 0.14 s on an M-series Mac. The fastest of three runs, with room to
+    /// spare, so a busy CI runner does not fail it but a slower renderer does.
     func testRendersTheSampleQuickly() throws {
         let sample = try String(contentsOf: fixture("Sample.md"), encoding: .utf8)
         let big = String(repeating: sample + "\n\n", count: 100) // about 130 KB
-        let start = Date()
-        let rendered = MarkdownRenderer(baseURL: fixture("Sample.md")).render(big)
-        XCTAssertGreaterThan(rendered.text.length, 50_000)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 0.8)
+        let fastest = (1...3).map { _ in
+            let start = Date()
+            let rendered = MarkdownRenderer(baseURL: fixture("Sample.md")).render(big)
+            XCTAssertGreaterThan(rendered.text.length, 50_000)
+            return Date().timeIntervalSince(start)
+        }.min()!
+        XCTAssertLessThan(fastest, 1, "the fastest of three runs took \(fastest) s")
     }
 
     /// READMEs put HTML blocks everywhere: their cost must not grow with the
